@@ -407,6 +407,7 @@ class CronService:
                     "payload": {
                         "kind": j.payload.kind,
                         "message": j.payload.message,
+                        "modelPreset": j.payload.model_preset,
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
@@ -719,6 +720,7 @@ class CronService:
         name: str,
         schedule: CronSchedule,
         message: str,
+        model_preset: str | None = None,
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
@@ -741,6 +743,7 @@ class CronService:
             payload=CronPayload(
                 kind="agent_turn",
                 message=message,
+                model_preset=model_preset,
                 deliver=deliver,
                 channel=channel,
                 to=to,

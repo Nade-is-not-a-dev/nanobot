@@ -10,7 +10,11 @@ from typing import Any, Protocol
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cron.session_delivery import origin_delivery_context
-from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
+from nanobot.cron.session_turns import (
+    CRON_DEFER_UNTIL_IDLE_META,
+    CRON_MODEL_PRESET_META,
+    CRON_TRIGGER_META,
+)
 from nanobot.cron.types import CronJob, CronRunResult
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.utils.prompt_templates import render_template
@@ -89,6 +93,8 @@ async def run_bound_cron_job(
         ),
     }
     metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+    if job.payload.model_preset:
+        metadata[CRON_MODEL_PRESET_META] = job.payload.model_preset
     run_record_base: dict[str, Any] = {
         "job_id": job.id,
         "job_name": job.name,

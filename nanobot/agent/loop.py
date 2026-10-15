@@ -60,6 +60,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import command_text
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.cron.session_turns import cron_model_preset
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
@@ -556,6 +557,20 @@ class AgentLoop:
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
             self.sessions.save(session)
             return self.llm_runtime()
+
+    def _cron_preset_runtime(self, metadata: Mapping[str, Any] | None) -> LLMRuntime | None:
+        """Resolve the model preset a cron job selected for its own turn."""
+        name = cron_model_preset(metadata)
+        if not name:
+            return None
+        try:
+            return self.runtime_resolver.resolve_preset(name)
+        except (KeyError, ValueError):
+            logger.warning(
+                "Cron job model preset '{}' is unavailable; using the session runtime",
+                name,
+            )
+            return None
 
     def set_session_model_preset(
         self,
@@ -2066,7 +2081,9 @@ class AgentLoop:
         session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
-            runtime = self.runtime_for_session(session)
+            runtime = self._cron_preset_runtime(ctx.msg.metadata) or self.runtime_for_session(
+                session
+            )
             ctx.runtime = runtime
         if ctx.session_key.startswith("dream:"):
             logger.info(

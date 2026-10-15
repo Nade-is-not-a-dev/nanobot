@@ -13,6 +13,15 @@ from nanobot.session.automation_spec import (
 CRON_TRIGGER_META = "_cron_trigger"
 CRON_DEFER_UNTIL_IDLE_META = "_cron_defer_until_session_idle"
 CRON_HISTORY_META = "_cron_turn"
+CRON_MODEL_PRESET_META = "_cron_model_preset"
+
+
+def cron_model_preset(metadata: Mapping[str, Any] | None) -> str | None:
+    """Read the model preset a cron job selected for its own turn, if any."""
+    if not isinstance(metadata, Mapping):
+        return None
+    value = metadata.get(CRON_MODEL_PRESET_META)
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _cron_history_text(trigger: Mapping[str, Any]) -> str | None:

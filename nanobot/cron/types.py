@@ -23,6 +23,11 @@ def _store_int(value: Any, default: int | None = 0) -> int | None:
     return int(value)
 
 
+def _optional_str(value: Any) -> str | None:
+    """Keep a stripped non-empty string; treat anything else as unset."""
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 @dataclass
 class CronSchedule:
     """Schedule definition for a cron job."""
@@ -52,6 +57,8 @@ class CronPayload:
     """What to do when the job runs."""
     kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
+    # Optional model preset name used for this job's own turns.
+    model_preset: str | None = None
     # Legacy delivery fields used by pre-session-bound cron jobs.
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
@@ -68,6 +75,7 @@ class CronPayload:
         return cls(
             kind=data.get("kind", "agent_turn"),
             message=data.get("message", ""),
+            model_preset=_optional_str(get_camel_snake(data, "modelPreset", "model_preset")),
             deliver=data.get("deliver", False),
             channel=data.get("channel"),
             to=data.get("to"),

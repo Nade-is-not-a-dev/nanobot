@@ -29,6 +29,10 @@ _CRON_PARAMETERS = tool_parameters_schema(
         "Do not copy the current channel/chat ID or require a message tool call for that reply. "
         "Include other recipients only when the user requests separate sends."
     ),
+    model_preset=StringSchema(
+        "Optional model preset name for this job's turns, from the top-level modelPresets "
+        "config. Omit to run with the chat's own model. Only for action='add'."
+    ),
     every_seconds=IntegerSchema(
         description="Interval in seconds (for recurring tasks)", minimum=1
     ),
@@ -52,9 +56,15 @@ _CRON_PARAMETERS = tool_parameters_schema(
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
-    def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
+    def __init__(
+        self,
+        cron_service: CronService,
+        default_timezone: str = "UTC",
+        model_presets: list[str] | None = None,
+    ):
         self._cron = cron_service
         self._default_timezone = default_timezone
+        self._model_presets = list(model_presets or [])
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
@@ -65,7 +75,12 @@ class CronTool(Tool):
         cron_service = ctx.cron_service
         if cron_service is None:
             raise RuntimeError("CronTool requires an initialized cron service")
-        return cls(cron_service=cron_service, default_timezone=ctx.timezone)
+        presets = sorted(getattr(ctx.runtime_control, "model_presets", None) or {})
+        return cls(
+            cron_service=cron_service,
+            default_timezone=ctx.timezone,
+            model_presets=presets,
+        )
 
     @staticmethod
     def _request_route() -> tuple[str, str, str, dict[str, Any]]:
@@ -120,6 +135,13 @@ class CronTool(Tool):
             errors.append("job_id is required when action='remove'")
         return errors
 
+    def _canonical_preset(self, name: str) -> str | None:
+        """Match a preset name against the configured catalog, ignoring case."""
+        if not self._model_presets:
+            return name.strip()
+        matches = [p for p in self._model_presets if p.casefold() == name.strip().casefold()]
+        return matches[0] if len(matches) == 1 else None
+
     async def execute(
         self,
         action: str,
@@ -130,12 +152,13 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        model_preset: str | None = None,
     ) -> str:
         if action == "add":
             request = current_request_context()
             if request is not None and is_cron_turn(request.metadata):
                 return ToolResult.error("Error: cannot schedule new jobs from within a cron job execution")
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at)
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at, model_preset)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -150,6 +173,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        model_preset: str | None = None,
     ) -> str:
         if not message:
             return ToolResult.error(
@@ -167,6 +191,14 @@ class CronTool(Tool):
         if tz:
             if err := self._validate_timezone(tz):
                 return err
+        if model_preset:
+            canonical = self._canonical_preset(model_preset)
+            if canonical is None:
+                available = ", ".join(self._model_presets) or "(none configured)"
+                return ToolResult.error(
+                    f"Error: unknown model preset '{model_preset}'. Available presets: {available}"
+                )
+            model_preset = canonical
 
         schedule_count = sum(
             value is not None for value in (every_seconds, cron_expr, at)
@@ -213,13 +245,15 @@ class CronTool(Tool):
             name=name or message[:30],
             schedule=schedule,
             message=message,
+            model_preset=model_preset,
             delete_after_run=delete_after,
             session_key=session_key,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             origin_metadata=origin_metadata,
         )
-        return f"Created job '{job.name}' (id: {job.id})"
+        suffix = f" using model preset '{model_preset}'" if model_preset else ""
+        return f"Created job '{job.name}' (id: {job.id}){suffix}"
 
     def _format_timing(self, schedule: CronSchedule) -> str:
         """Format schedule as a human-readable timing string."""
@@ -269,6 +303,8 @@ class CronTool(Tool):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            if j.payload.model_preset:
+                parts.append(f"  Model preset: {j.payload.model_preset}")
             if j.payload.kind == "system_event":
                 parts.append(f"  Purpose: {self._system_job_purpose(j)}")
                 parts.append("  Protected: visible for inspection, but cannot be removed.")
